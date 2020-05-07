@@ -8,4 +8,7 @@ title: About
 # MIT License
 ---
 
-> **Note**: Add Markdown syntax content to file `tabs/about.md` and it will show up on this page.
+This is Dmitrii Bundin's personal blog devoted to low level performance engineering on various x86 microarchitectures.
+
+Dmitrii is a Software Engineer with more then 6 years of total experience primarily working with C/Linux, Scala, Java and Python.
+He currently researches internals of x86 microarchitectures and their impact on software performance.
