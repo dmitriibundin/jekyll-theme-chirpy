@@ -13,9 +13,8 @@ title: Dmitrii Bundin                          # the main title
 tagline: Low Level Performance Engineering  # it will display as the sub-title
 
 description: >-                        # used by seo meta and the atom feed
-  A minimal, portfolio, sidebar,
-  bootstrap Jekyll theme with responsive web design
-  and focuses on text presentation.
+    Research of x86 microarchetictures and
+    Low Level Performance Engineering
 
 # Replace with the website url, e.g. 'https://username.github.io'
 url: 'protocol://domain'
