@@ -1,8 +1,7 @@
 ---
 title: Undocumented miss granularity of the uops cache on Skylake microarchitecture.
 author: Dmitrii Bundin
-date: 2020-05-07 20:19:51 +0300
-comments: true
+date: 2020-05-16 04:30:46 +0300
 categories: [CPU, FrontEnd]
 tags: [x86, uops-cache]
 ---
