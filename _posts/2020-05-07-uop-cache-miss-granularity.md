@@ -24,7 +24,7 @@ The uops cache structure significantly differs from what we have in the standard
 
  - Up to three ways may be dedicated to the same 32-byte aligned chunk allowing a total of 18 micro-ops to be cached per 32-byte region of the original IA program.
 
-The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue, it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decode stage. The key point here is that it might but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel documents the case as follows
+The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue, it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decode stage. The key point here is that it might but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-bytes region overflow the uops cache. Intel documents the case as follows
 
 IAOM/B.5.7.3:
 
@@ -51,13 +51,13 @@ To analyze the uops cache behavior we will need routines written in the Assembly
 
 The counters we are interested in are `icache_64b.iftag_hit:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `idq.ms_uops:u`. Consider each of them separately:
 
- - `icache_64b.iftag_hit` - As per the [Intel System Programming Manual](https://software.intel.com/content/dam/develop/public/us/en/documents/325384-sdm-vol-3abcd.pdf) it counts "Instruction fetch tag lookups that hit in the instruction cache (L1I)". The modern CPU caches however stores a memory address along with a cache line. The address basically consists of 3 components: offset, index and tag. The index is used to determine possible ways a line may occupy in the cache and the tag is used to check if the address is actually cached. IDK if the "Instruction fetch tag" is the same or has empty or non-empty overlapping with the address tag.
+ - `icache_64b.iftag_hit` - As per the [Intel System Programming Manual](https://software.intel.com/content/dam/develop/public/us/en/documents/325384-sdm-vol-3abcd.pdf) it counts "Instruction fetch tag lookups that hit in the instruction cache (L1I)". Modern CPU caches however store a memory address along with a cache line. The address consists of 3 components: offset, index and tag. The index is used to determine possible ways a line may occupy in the cache and the tag is used to check if the address is actually cached. IDK if the "Instruction fetch tag" is the same or has empty or non-empty overlapping with the address tag.
 
  - `idq.dsb_uops` - Counts the number of micro-ops delivered from the uops cache.
 
  - `idq.mite_uops` - Counts the number of micro-ops delivered from the Legacy Decode Pipeline
 
- - `idq.ms_uops` - Counts the number of micro-ops delivered from Microcode Sequencer
+ - `idq.ms_uops` - Counts the number of micro-ops delivered from the Microcode Sequencer
 
 The `:u` suffix means that the counters will be collected for user code only which runs in the ring 3. It is natively supported by the Intel hardware and implemented as a dedicated bit in the `IA32_PERFEVTSEL` MSR. Here is how the Intel System Programming Manual depicts the `IA32_PERFEVTSEL` structure:
 
@@ -65,7 +65,7 @@ The `:u` suffix means that the counters will be collected for user code only whi
 
 The `USR` bit corresponds to user-space counters. A counter programmed with one of the `IA32_PERFEVTSEL`s can later be read from the corresponding `IA32_PMC` MSR. 
 
-Most of the examples used in this article will be implemented as NASM macros which basically consist of a loop with iterations count specified in the `rdi` register. The iterations count used in the examples will be set to `1 << 31` which seems optimal in the sense of collecting counters and time spent on running the examples. Here is how the main program entry point look like:
+Most of the examples used in this article will be implemented as NASM macros which consist of a loop with iterations count specified in the `rdi` register. The iterations count used in the examples will be set to `1 << 31` which seems optimal in the sense of collecting counters and time spent on running the examples. Here is how the main program entry point look like:
 
 ```
 ITERATION_COUNT equ 1 << 31
@@ -117,7 +117,7 @@ The macro argument specifies the number of times to repeat `times 8 nop ax`. We 
 
 The `idq.dsb_uops`, `idq.mite_uops`, `idq.ms_uops` are pretty expected. All of the uops are delivered from the uops cache since 8 consecutive `nop ax` instructions consume the entire 32-bytes region. 
 
-The insteresting thing to notice is actually on the plot of `icache_64b.iftag_hit`. As can be seen the instruction fetch tag hit lookup happens once per 64 bytes. The 64 bytes in turns contains 2 32-bytes instruction regions cached in the uops cache. Considering the fact that switches from `MITE` to `DSB` require a branch micro-op to be taken it is reasonable to check how the counters are affected by the unconditional `jmp` inserted in the middle of cache lines. This brings us to the following example:
+The insteresting thing to notice is actually on the plot of `icache_64b.iftag_hit`. As can be seen the instruction fetch tag lookup happens once per 64 bytes. The 64 bytes in turns contain 2 32-bytes regions cached in the uops cache. Considering the fact that switches from `MITE` to `DSB` require a branch micro-op to be taken it is reasonable to check how the counters are affected by the unconditional `jmp` inserted in the middle of cache lines. This brings us to the following example:
 
 ### Fetching from the uops cache with jmp
 
@@ -153,14 +153,14 @@ Running the example with perf we have the following results:
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/uops-hits-jmp.png" | relative_url }})
 
-Results depicted on the second plot meet our expectations perfectly. All of the uops are delivered from the DSB, while MITE is staying idle. Moreover the result is exactly the same as we saw in the previous example. This is because `nop ax` and the near jump instruction `jmp` are both decoded into a signle micro-op.
+Results depicted on the second plot meet our expectations perfectly. All of the uops are delivered from the DSB, while MITE is staying idle. Moreover the result is exactly the same as we saw in the previous example. This is because `nop ax` and the near jump instruction `jmp` are both decoded into a single micro-op.
 
 The key difference with the previous example can be observed on the first plot. As can be seen adding `jmp`s in the middle of cache lines causes additional instruction fetch tag lookup even thought the target is located within the same cache line. Recalling IAOM/2.5.2.2:
 
 > Once micro-ops are delivered from the legacy pipeline, fetching micro-ops
 > from the Decoded ICache can resume only after the next branch micro-op.
 
-we can get a direction for further steps in the research. It seems reasonable to check if MITE to DSB switches and probably DSB lookup itself are connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains a 32-bytes chunk that do not fit the DSB.
+we can get a direction for further steps in the research. It seems reasonable to check if MITE to DSB switches and probably DSB lookup itself are connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains a 32-bytes chunk that does not fit the DSB.
 
 ### Overflowing DSB with too many uops
 
@@ -300,9 +300,9 @@ Now lets take a look at an example with slightly different structure that we hav
 %endmacro
 ```
 
-The principal thing to notice about the macro is that it contais `jmp` somewhere in the middle of the first 32-bytes region of a cache line. The `jmp` instruction itself was artificially inserted to research the impact of taken branches on the DSB misses. Basically what we have here is `nop` repeated `n` times where `n` varies between 0 and 30 inclusively. The `nop`s follow `jmp` jumping to the exactly next insruction so it does not change any control flow. After the `jmp` there there are `nop`s till the end of the cache line. At the very beginning of the next cache line there is a loop conditional branch.
+The principal thing to notice about the macro is that it contais `jmp` somewhere in the middle of the first 32-bytes region of a cache line. The `jmp` instruction itself was artificially inserted to research the impact of taken branches on the DSB misses. Basically what we have here is `nop` repeated `n` times where `n` varies between 0 and 30 inclusively. The `nop`s follow `jmp` jumping to the exactly next instruction so it does not change the control flow. After the `jmp` there are `nop`s till the end of the cache line. At the very beginning of the next cache line there is a loop conditional branch.
 
-Now let's take a look a the results, but only for `18 <= n <= 30` at first :
+Now let's take a look at the results, but only for `18 <= n <= 30` at first :
 
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/partial-miss-all-uops.png" | relative_url }})
@@ -353,7 +353,7 @@ example_fun:
 
 ```
 
-What the function does is it checks if the current value in `rdi` is even or odd and in case if it's even the control flow jumps to the `.no_fetch_start` label. The region this label defines spans 2 32-bytes regions within the same cache line. The most import thing about it is that the second 32-bytes part is ended with the branch micro-op. There is a [jcc erratum](https://www.intel.com/content/dam/support/us/en/documents/processors/mitigations-jump-conditional-code-erratum.pdf) stating that if 32-bytes region ends with a jump micro op then the whole region misses the DSB. And that's exactly what we are going to check here. The second 32-bytes part of the `.no_fetch_start` region misses due to the erratum and applying our emperical observation we can state that the part starting the `.no_fetch_start` label till the 32-bytes boundary will miss as well.
+What the function does is it checks if the current value in `rdi` is even or odd and in case if it's even the control flow jumps to the `.no_fetch_start` label. The region this label defines spans 2 32-bytes regions within the same cache line. The most import thing about it is that the second 32-bytes part is ended with the branch micro-op. There is a [jcc erratum](https://www.intel.com/content/dam/support/us/en/documents/processors/mitigations-jump-conditional-code-erratum.pdf) stating that if 32-bytes region ends with a jump micro op then the whole region misses the DSB. And that's exactly what we are going to check here. The second 32-bytes part of the `.no_fetch_start` region misses due to the erratum and applying our emperical observation we can state that the part starting from the `.no_fetch_start` label till the 32-bytes boundary will miss as well.
 
 The expected number of MITE micro-ops would look like
 
