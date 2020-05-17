@@ -2,13 +2,13 @@
 title: An undocumented aspect of the uops cache miss granularity on Skylake microarchitecture.
 author: Dmitrii Bundin
 date: 2020-05-16 04:30:46 +0300
-categories: [CPU, FrontEnd]
+categories: [CPU, Front-end]
 tags: [x86, uops-cache]
 ---
 
 ## Introduction
 
-Starting Sandy Brindge microarchitecture the uops cache (a.k.a. Decoded ICache, DSB, Decode Stream Buffer) is a part of the CPU Front End and is responsible for caching microoperations of recently decoded instructions. Its primary goal is to reduce power and latency of the Front End and avoid performance bottlenecks like LCP (Length Changing Prefix) stalls which the [Intel Architecture Optimization Manual](https://software.intel.com/content/www/us/en/develop/download/intel-64-and-ia-32-architectures-optimization-reference-manual.html) (IAOM) documents to have 3 cycles penalty.
+Starting Sandy Brindge microarchitecture the uops cache (a.k.a. Decoded ICache, DSB, Decode Stream Buffer) is a part of the CPU Front-end and is responsible for caching microoperations of recently decoded instructions. Its primary goal is to reduce power and latency of the Front-end and avoid performance bottlenecks like LCP (Length Changing Prefix) stalls which the [Intel Architecture Optimization Manual](https://software.intel.com/content/www/us/en/develop/download/intel-64-and-ia-32-architectures-optimization-reference-manual.html)(IAOM) documents to have 3 cycles penalty.
 
 IAOM/2.5.2.1:
 
@@ -20,11 +20,11 @@ The uops cache structure significantly differs from what we have in the standard
 
  - uops cache consists of 32 sets each of which contains 8 ways. Each way in turn can hold up to 6 micro-ops allowing up to 1536 micro-ops to be cached in total.
 
- - All micro-ops in a Way represent instructions which are statically contiguous in the code and have their EIPs within the same aligned 32-byte region.
+ - All micro-ops in a way represent instructions which are statically contiguous in the code and have their EIPs within the same aligned 32-byte region.
 
- - Up to three Ways may be dedicated to the same 32-byte aligned chunk, allowing a total of 18 micro-ops to be cached per 32-byte region of the original IA program.
+ - Up to three ways may be dedicated to the same 32-byte aligned chunk allowing a total of 18 micro-ops to be cached per 32-byte region of the original IA program.
 
-The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decode stage. The key point here is that it might, but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel clearly documents such case 
+The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue, it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decode stage. The key point here is that it might but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel documents the case as follows
 
 IAOM/B.5.7.3:
 
@@ -41,13 +41,13 @@ IAOM/2.5.2.2:
 
  - Once micro-ops are delivered from the legacy pipeline, fetching micro-ops from the Decoded ICache can resume only after the next branch micro-op
 
-The 2 things these rules suggest us to check are how (predicted to be taken) branches affect the microarchitectural state of the Front End and how the uops cache interacts with L1I.
+The 2 things these rules suggest us to check are how (predicted to be taken) branches affect the microarchitectural state of the Front-end and how the uops cache interacts with L1I.
 
 Let's go ahead and get started.
 
-## Drill down the uops cache
+## Uops cache analysis
 
-To analyze the uops cache behavior we will need routines written in the Assembly language. All of the examples below are guaranteed to be assembled by NASM version 2.13.02 and run on Intel Kaby Lake i7-8550U CPU. Basically what we are going to do is to collect Performance Counters provided by the Intel PMU and try to come to a sensible conclusion depending on what a particular routine does.
+To analyze the uops cache behavior we will need routines written in the Assembly language. All of the examples below are guaranteed to be assembled by NASM version 2.13.02 and run on Intel Kaby Lake i7-8550U CPU. Basically what we are going to do is to collect performance counters provided by the Intel PMU and try to come to a sensible conclusion depending on what a particular routine does.
 
 The counters we are interested in are `icache_64b.iftag_hit:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `idq.ms_uops:u`. Consider each of them separately:
 
@@ -93,7 +93,7 @@ _start:
 
 In some examples considered below we will need to count uops by hand which is done in the ***fused domain***. It means that Macro Fused pair `dec rdi`, `jnz` will be accounted as a signle micro-op.
 
-The source code of all the examples provided in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistakes, leaving a comment here or openinig a pull request is highly appreciated. Talk less, work more, and here is the first example:
+The source code of all the examples provided in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistakes, leaving a comment here or openinig a pull request is highly appreciated.
 
 ### Simple fetching from the uops cache
 
