@@ -16,7 +16,7 @@ IAOM/2.5.2.1:
 > length of instructions. Therefore they cause an additional penalty of three cycles per LCP during length
 > decoding.
 
-The uops cache structure significantly differs from what we have in the standard instruction/data cache. IAOM provides some details about its internal organization and there are 3 important aspects to understand:
+The uops cache structure significantly differs from what we have in the standard instruction/data caches. IAOM provides some details about its internal organization and there are 3 important aspects to understand:
 
  - uops cache consists of 32 sets each of which contains 8 ways. Each way in turn can hold up to 6 micro-ops allowing up to 1536 micro-ops to be cached in total.
 
@@ -24,7 +24,7 @@ The uops cache structure significantly differs from what we have in the standard
 
  - Up to three Ways may be dedicated to the same 32-byte aligned chunk, allowing a total of 18 micro-ops to be cached per 32-byte region of the original IA program.
 
-The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decoding stage. The key point here is that it might, but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel clearly documents such case 
+The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decode stage. The key point here is that it might, but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel clearly documents such case 
 
 IAOM/B.5.7.3:
 
@@ -41,7 +41,7 @@ IAOM/2.5.2.2:
 
  - Once micro-ops are delivered from the legacy pipeline, fetching micro-ops from the Decoded ICache can resume only after the next branch micro-op
 
-The 2 things these rules suggest us to check are how (predicted to be taken) branches affect the microarchitectural state of the Front End when fetching from the uops cache and how the uops cache interacts with L1I.
+The 2 things these rules suggest us to check are how (predicted to be taken) branches affect the microarchitectural state of the Front End and how the uops cache interacts with L1I.
 
 Let's go ahead and get started.
 
@@ -93,7 +93,7 @@ _start:
 
 In some examples considered below we will need to count uops by hand which is done in the ***fused domain***. It means that Macro Fused pair `dec rdi`, `jnz` will be accounted as a signle micro-op.
 
-The source code of all the examples provided in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistake, leaving a comment here or openinig a pull request is highly appreciated. Talk less, work more, and here is the first example:
+The source code of all the examples provided in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistakes, leaving a comment here or openinig a pull request is highly appreciated. Talk less, work more, and here is the first example:
 
 ### Simple fetching from the uops cache
 
@@ -160,7 +160,7 @@ The key difference with the previous example can be observed on the first plot. 
 > Once micro-ops are delivered from the legacy pipeline, fetching micro-ops
 > from the Decoded ICache can resume only after the next branch micro-op.
 
-we can get a direction for further steps in the research. It might mean that MITE to DSB switches and probably the DSB lookup itself is connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains a 32-bytes chunk that do not fit the DSB.
+we can get a direction for further steps in the research. It seems reasonable to check if MITE to DSB switches and probably DSB lookup itself are connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains a 32-bytes chunk that do not fit the DSB.
 
 ### Overflowing DSB with too many uops
 
@@ -189,7 +189,7 @@ To check how the DSB behaves when micro-ops cannot fit it we can consider an exa
 %endmacro
 ```
 
-What we have here is each 64-bytes L1I line contains 8 `nop ax`s following 19 `nop`s ending with either `jmp` to the begginning of the consequtive cache line or a loop conditional branch.
+What we have here is each 64-bytes L1I line contains 8 `nop ax`s following 19 `nop`s ending with either `jmp` to the begginning of the consecutive cache line or a loop conditional branch.
 
 Before providing the results of the experiments let's try to imagine how they might look like. For specificity consider the `nopax8nop19jmp 2` macro invokation. Its code is kind of verbose, but I will provide it here with some comments added for clarity's sake:
 
@@ -311,7 +311,7 @@ The result is expected. The first 32-byte region clearly overflows the DSB since
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/partial-hits-uops.png" | relative_url }})
 
-The result is kind of surprising, isn't it? We clearely have a partial hit per 32-bytes region here. Recalling how DSB caches micro-ops the result for 17 and below might become clearer. Having 17 `nop`s and 1 `jmp` gives us 18 micro ops in total. The DSB is allowed to use at most 3 ways per 32-bytes region each of which can to hold at most 6 micro-ops. It allows no more then 18 micro-ops to be cached per 32-bytes region. And this is exactly the number we have in the experiment.
+It is kind of surprising, isn't it? We clearely have a partial hit per 32-bytes region here. Recalling how DSB caches micro-ops the result for 17 and below might become clearer. Having 17 `nop`s and 1 `jmp` gives us 18 micro ops in total. The DSB is allowed to use at most 3 ways per 32-bytes region each of which can hold at most 6 micro-ops. It allows no more then 18 micro-ops to be cached per 32-bytes region. And this is exactly the number we have in the experiment.
 
 Recalling that branches predicted to be taken require Instruction Fetch Tag lookup and combining all the experiments that have been run so far I came to the following emprical observation:
 
@@ -392,10 +392,10 @@ Our expectation is very close to the result reported by perf events: `12â€¯884â€
 
 ## Conclusion
 
-The uops cache is clearly documented in the Intel Software Optimization Manuals, but there are nuances:
+The uops cache is clearly documented in the Intel Software Optimization Manual, but there are nuances:
 
  - At least on **Kaby Lake i7-8550U** uops cannot be delivered from the DSB if any of them cannot fit it within the Instruction Fetch Tag boundary. The boundary may be defined with either a branch micro-op or a cache line end.
 
  - Even though uops may hit the DSB within the IF Tag boundary it is difficult to predict how many of them will actually be delivered from it (See [the example above](#partial-dsb-hits-per-32-byte-region))
 
- - All the examples above contain no more than 1 taken branches per cache line. If there are 2 or more things get much more unpredictable so it is difficult to give a reasonable estimation even in simple cases. This is what I still how no idea about.
+ - All of the examples above contain no more than 1 taken branches per cache line. If there are 2 or more things get much more unpredictable so it is difficult to give a reasonable estimation even in simple cases. This is what I still how no idea about.
