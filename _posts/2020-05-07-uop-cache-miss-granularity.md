@@ -1,5 +1,5 @@
 ---
-title: Undocumented miss granularity of the uops cache on Skylake microarchitecture.
+title: An undocumented aspect of the uops cache miss granularity on Skylake microarchitecture.
 author: Dmitrii Bundin
 date: 2020-05-16 04:30:46 +0300
 categories: [CPU, FrontEnd]
@@ -8,7 +8,7 @@ tags: [x86, uops-cache]
 
 ## Introduction
 
-Starting Sandy Brindge microarchitecture the uops cache (a.k.a. Decoded ICache, DSB, Decode Stream Buffer) is a part of the CPU Front End and is responsible for caching microoperations of recently decoded instructions. Its primary goal is to reduce power and latency of the Front End and therefore avoid performance bottlenecks like LCP (Length Changing Prefix) which the [Intel Architecture Optimization Manual](https://software.intel.com/content/www/us/en/develop/download/intel-64-and-ia-32-architectures-optimization-reference-manual.html) (IAOM) documents to have 3 cycles penalty.
+Starting Sandy Brindge microarchitecture the uops cache (a.k.a. Decoded ICache, DSB, Decode Stream Buffer) is a part of the CPU Front End and is responsible for caching microoperations of recently decoded instructions. Its primary goal is to reduce power and latency of the Front End and avoid performance bottlenecks like LCP (Length Changing Prefix) stalls which the [Intel Architecture Optimization Manual](https://software.intel.com/content/www/us/en/develop/download/intel-64-and-ia-32-architectures-optimization-reference-manual.html) (IAOM) documents to have 3 cycles penalty.
 
 IAOM/2.5.2.1:
 
@@ -24,7 +24,7 @@ The uops cache structure significantly differs from what we have in the standard
 
  - Up to three Ways may be dedicated to the same 32-byte aligned chunk, allowing a total of 18 micro-ops to be cached per 32-byte region of the original IA program.
 
-Any time an instruction is decoded by the Legacy Decode Pipeline and delivered to the micro-op queue it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the Legacy Decode Pipeline. The key point here is that it might, but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel clearly documents such case 
+The two primary sources of micro-ops in the uops cache are either Legacy Decode Pipeline or Microcode ROM. Any time an instruction is decoded and delivered to the micro-op queue it is also delivered to the uops cache. Next time the micro-op is needed it ***might*** be delivered from the uops cache bypassing the decoding stage. The key point here is that it might, but also it ***might not***. One possible reason for that may be the micro-ops belonging to a 32-byte region overflow the uops cache. Intel clearly documents such case 
 
 IAOM/B.5.7.3:
 
@@ -33,7 +33,7 @@ IAOM/B.5.7.3:
 
 Basically what we are going to do during this article is to check how the statement above works on real examples. 
 
-Before starting out the research there are 2 more important facts to understand about the uops cache
+Before starting out the research there are 2 important facts to understand about the uops cache
 
 IAOM/2.5.2.2: 
 
@@ -41,7 +41,7 @@ IAOM/2.5.2.2:
 
  - Once micro-ops are delivered from the legacy pipeline, fetching micro-ops from the Decoded ICache can resume only after the next branch micro-op
 
-What these 2 rules suggest us to check is how (predicted to be taken) branches affect the microarchitectural state of the Front End when fetching from the uops cache and how the uops cache interacts with L1I.
+The 2 things these rules suggest us to check are how (predicted to be taken) branches affect the microarchitectural state of the Front End when fetching from the uops cache and how the uops cache interacts with L1I.
 
 Let's go ahead and get started.
 
@@ -59,13 +59,13 @@ The counters we are interested in are `icache_64b.iftag_hit:u`, `idq.dsb_uops:u`
 
  - `idq.ms_uops` - Counts the number of micro-ops delivered from Microcode Sequencer
 
-The `:u` suffix means that the counters will be collected for user code only which runs in the ring 3. It is natively supported by the Intel hardware and implemented as a dedicated bit in the `IA32_PERFEVTSEL` MSR. A counter programmed with one of the `IA32_PERFEVTSEL`s can later be read from the corresponding `IA32_PMC` MSR. Here is how the Intel System Programming Manual depicts the `IA32_PERFEVTSEL` structure:
+The `:u` suffix means that the counters will be collected for user code only which runs in the ring 3. It is natively supported by the Intel hardware and implemented as a dedicated bit in the `IA32_PERFEVTSEL` MSR. Here is how the Intel System Programming Manual depicts the `IA32_PERFEVTSEL` structure:
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/ia32perfevtsel_layout.png" | relative_url }})
 
-The `USR` bit corresponds to user-space counters.
+The `USR` bit corresponds to user-space counters. A counter programmed with one of the `IA32_PERFEVTSEL`s can later be read from the corresponding `IA32_PMC` MSR. 
 
-Most of the examples used in this article will be implemented as NASM macros which basically consist of a loop with iteration count specified in the `rdi` register. The iteration count used in the examples will be set to `1 << 31` which seems optimal in the sense of collecting counters and time spent on running the examples. Here is how the main program entry point look like:
+Most of the examples used in this article will be implemented as NASM macros which basically consist of a loop with iterations count specified in the `rdi` register. The iterations count used in the examples will be set to `1 << 31` which seems optimal in the sense of collecting counters and time spent on running the examples. Here is how the main program entry point look like:
 
 ```
 ITERATION_COUNT equ 1 << 31
@@ -91,9 +91,9 @@ _start:
   Initially it was implemented in C and planned to be rewritten in C++ to automate code generation using templates, but after a while it turned out to be impractical and add unnecessary complications when communicating to hand-written assembly code.
 </details>
 
-In some examples considered below we will need to count the uops by hand which is done in the ***fused domain***. It means that Macro Fused pair `dec rdi`, `jnz` will be accounted as a signle micro-op.
+In some examples considered below we will need to count uops by hand which is done in the ***fused domain***. It means that Macro Fused pair `dec rdi`, `jnz` will be accounted as a signle micro-op.
 
-The source code of all the examples in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistake, leaving a comment here or openinig a pull request is highly appreciated. Talk less, work more, and here is the first example:
+The source code of all the examples provided in this article is available on my [GitHub repository](https://github.com/dmitriibundin/microarch-check/tree/master/ucache-miss-granularity). If you find any mistake, leaving a comment here or openinig a pull request is highly appreciated. Talk less, work more, and here is the first example:
 
 ### Simple fetching from the uops cache
 
@@ -147,24 +147,24 @@ To investigate the uops cache behavior when taking unconditional branches we nee
 %endmacro
 ```
 
-What the macro `nopax7jmp` does is it generates blocks of assembly code. Each block comprises either `times 7 nop ax` following the unconditional `jmp` to the start of the next 32-bytes aligned region or just `times 8 nop ax`. The sole macro argument specifies the total number of such blocks to generate so that they alternate each other.
+What the macro `nopax7jmp` does is it generates blocks of assembly code. Each block comprises either `times 7 nop ax` following the unconditional `jmp` to the start of the next 32-bytes aligned region or just `times 8 nop ax`. The macro argument specifies the total number of such blocks to generate so that they alternate each other.
 
 Running the example with perf we have the following results:
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/uops-hits-jmp.png" | relative_url }})
 
-Results depicted on the second plot meet our expectations perfectly. All of the uops are delivered from the DSB, while MITE is staying idle. Moreover the result is exactly the same as we saw on the previous example. This is because `nop ax` and the near jump instruction `jmp` are both decoded into a signle micro-op.
+Results depicted on the second plot meet our expectations perfectly. All of the uops are delivered from the DSB, while MITE is staying idle. Moreover the result is exactly the same as we saw in the previous example. This is because `nop ax` and the near jump instruction `jmp` are both decoded into a signle micro-op.
 
 The key difference with the previous example can be observed on the first plot. As can be seen adding `jmp`s in the middle of cache lines causes additional instruction fetch tag lookup even thought the target is located within the same cache line. Recalling IAOM/2.5.2.2:
 
 > Once micro-ops are delivered from the legacy pipeline, fetching micro-ops
 > from the Decoded ICache can resume only after the next branch micro-op.
 
-It might mean that MITE to DSB switches and probably the DSB lookup itself is connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains 32-bytes chunk that do not fit the DSB.
+we can get a direction for further steps in the research. It might mean that MITE to DSB switches and probably the DSB lookup itself is connected to the Instruction Fetch (IF) tag lookup. To get more insights consider an example where an L1I line contains a 32-bytes chunk that do not fit the DSB.
 
 ### Overflowing DSB with too many uops
 
-To check how the DSB behaves when micro-ops cannot fit it we can consider an example containing more then 18 consecutive `nop` instructions within a 32-byte chunk. Here it is:
+To check how the DSB behaves when micro-ops cannot fit it we can consider an example containing more then 18 consecutive `nop` instructions within a 32-bytes chunk. For example:
 
 ```
 %macro nopax8nop19jmp 1
@@ -189,12 +189,12 @@ To check how the DSB behaves when micro-ops cannot fit it we can consider an exa
 %endmacro
 ```
 
-What we have here is each 64-byte L1I line contains 8 `nop ax`s following 19 `nop`s ending with either `jmp` to the begginning of the next 64-byte aligned chunk or a loop conditional branch.
+What we have here is each 64-bytes L1I line contains 8 `nop ax`s following 19 `nop`s ending with either `jmp` to the begginning of the consequtive cache line or a loop conditional branch.
 
-Before providing the results of the experiments let's try to imagine how it might look like. For specificity consider the `nopax8nop19jmp 2` macro invokation. Its code is kind of verbose, but I will provide it here with some comments added for clarity's sake:
+Before providing the results of the experiments let's try to imagine how they might look like. For specificity consider the `nopax8nop19jmp 2` macro invokation. Its code is kind of verbose, but I will provide it here with some comments added for clarity's sake:
 
 ```
-;first 64-byte aligned block start
+;first 64-bytes aligned block start
 <..@2.loop> nop    ax
 nop    ax
 nop    ax
@@ -226,9 +226,9 @@ nop
 jmp    0x400100 <..@5.aligned_label> ;jump to the second block start
 ;first block end
 
-;nop's to meet 64-byte alignment
+;nop's to meet 64-bytes alignment
 
-;second 64-byte aligned block start
+;second 64-bytes aligned block start
 <..@5.aligned_label> nop    ax
 nop    ax                                                                                                                                                             
 nop    ax                                                                                                                                                             
@@ -262,7 +262,7 @@ jne    0x4000c0 <..@2.loop>
 ;second block end
 ```
 
-The 19 `nop`s at the end of each cache line do not fit the DSB so the switching to the Legacy Decode Pipeline should occur and all of the micro-ops should be delivered from there. Having `jmp` to the next cache line right after the 19 `nop`s and taking IAOM/2.5.5.2 
+The 19 `nop`s at the end of each cache line do not fit the DSB so switching to the Legacy Decode Pipeline should occur and all of the micro-ops should be delivered from there. Having `jmp` to the next cache line right after the 19 `nop`s and taking IAOM/2.5.5.2 
 
 >Once micro-ops are delivered from the legacy pipeline, fetching micro-ops from the Decoded ICache can resume only after the next branch micro-op
 
@@ -274,14 +274,14 @@ Now let's take a look at what the actual results are:
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/dsb-ovf-full-line-miss-uops.png" | relative_url }})
 
-The result does not meer our expectation. The most ineteresting thing here is that the number of uops delivered from the DSB were exactly 0. In all cases. It means that all of the uops were delivered from MITE. Now recall the IAOM/B.5.7.3:
+The result does not meer our expectation. The most interesting thing here is that the number of uops delivered from the DSB were exactly 0. In all cases. It means that all of the uops were delivered from MITE. Now recall the IAOM/B.5.7.3:
 
 > There are no partial hits in the Decoded ICache. If any micro-op that is part of that lookup on the 32-byte
 > chunk is missing, a Decoded ICache miss occurs on all micro-ops for that transaction.
 
 The example shown above suggests that the miss might happen not just for 32-byte lookup but for the whole cache line. To better understand conditions under which such misses may occur we need to consider a few more examples.
 
-### Partial DSB hits per 32-byte region
+### Partial DSB hits per 32-bytes region
 
 Now lets take a look at an example with slightly different structure that we have worked with before.
 
@@ -302,24 +302,24 @@ Now lets take a look at an example with slightly different structure that we hav
 
 The principal thing to notice about the macro is that it contais `jmp` somewhere in the middle of the first 32-bytes region of a cache line. The `jmp` instruction itself was artificially inserted to research the impact of taken branches on the DSB misses. Basically what we have here is `nop` repeated `n` times where `n` varies between 0 and 30 inclusively. The `nop`s follow `jmp` jumping to the exactly next insruction so it does not change any control flow. After the `jmp` there there are `nop`s till the end of the cache line. At the very beginning of the next cache line there is a loop conditional branch.
 
-Now let's take a look a the results, but at first only for `18 <= n <= 30`:
+Now let's take a look a the results, but only for `18 <= n <= 30` at first :
 
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/partial-miss-all-uops.png" | relative_url }})
 
-The result is expected. The first 32-byte region clearly overflows the DSB since it contains 31 micro-ops in total. But why did I consider the result starting 18? To understand it let's take a look at the whole result set of the experiment:
+The result is expected. The first 32-byte region clearly overflows the DSB since it contains 31 micro-ops in total. But why did I consider the results starting 18? To understand it let's take a look at the whole result set of the experiment:
 
 ![upload-image]({{ "/assets/img/uops-cache-miss-gran/partial-hits-uops.png" | relative_url }})
 
-The result is kind of surprising, isn't it? So we clearely have a partial hit per 32-bytes lookup here. Recalling how DSB caches micro-ops per 32-bytes region the result for 17 and below might become clearer. Having 17 `nop`s and 1 `jmp` gives us 18 micro ops in total. The DSB is allowed to use at most 3 ways per 32-bytes region each of which is allowed to hold at most 6 micro op. It results in the fact that at most 18 micro-ops can be cached per 32-bytes region. And this is exactly the number we have in the experiment.
+The result is kind of surprising, isn't it? We clearely have a partial hit per 32-bytes region here. Recalling how DSB caches micro-ops the result for 17 and below might become clearer. Having 17 `nop`s and 1 `jmp` gives us 18 micro ops in total. The DSB is allowed to use at most 3 ways per 32-bytes region each of which can to hold at most 6 micro-ops. It allows no more then 18 micro-ops to be cached per 32-bytes region. And this is exactly the number we have in the experiment.
 
 Recalling that branches predicted to be taken require Instruction Fetch Tag lookup and combining all the experiments that have been run so far I came to the following emprical observation:
 
->There is no partial hit per the largest region that does not require Instruction Fetch Tag lookup. It might me either cache line boundaries or branches predicted to be taken.
+>**There is no partial hit per the largest region that does not require Instruction Fetch Tag lookup. It may be either cache line boundaries or branches predicted to be taken.**
 
-Unfortunately it is difficult to predict the amount of uops delivered from DSB in such cases. As was shown on the previous plot the DSB delivery rate was highly non-linear depending on the number of uops.
+Unfortunately it is difficult to predict the actual amount of uops delivered from DSB in such cases. As was shown on the previous plot the DSB delivery rate was highly non-linear depending on the number of uops.
 
-So to check if the observation does not break when coming to more-or-less non trivial example let's consider the following:
+So to check if the observation does not break when coming to more-or-less non trivial cases let's consider the following:
 
 ## Example
 
@@ -353,7 +353,7 @@ example_fun:
 
 ```
 
-What the function does is it checks if the current value in `rdi` is even or odd and in case it is even the control flow jumps to the `.no_fetch_start` label. The region this label defines spans 2 32-bytes region within the cache line. The most import thing about it is that the second 32-bytes part is ended with the branch micro-op. There is a [jcc erratum](https://www.intel.com/content/dam/support/us/en/documents/processors/mitigations-jump-conditional-code-erratum.pdf) stating that if 32-bytes region ends with a jump micro op then the whole region misses the DSB. And that's exactly what we are going to check here. The second 32-bytes part of the `.no_fetch_start` region misses due to the erratum. Applying our emperical observation we can state that the part starting the `.no_fetch_start` label till the 32-bytes boundary will miss as well.
+What the function does is it checks if the current value in `rdi` is even or odd and in case if it's even the control flow jumps to the `.no_fetch_start` label. The region this label defines spans 2 32-bytes regions within the same cache line. The most import thing about it is that the second 32-bytes part is ended with the branch micro-op. There is a [jcc erratum](https://www.intel.com/content/dam/support/us/en/documents/processors/mitigations-jump-conditional-code-erratum.pdf) stating that if 32-bytes region ends with a jump micro op then the whole region misses the DSB. And that's exactly what we are going to check here. The second 32-bytes part of the `.no_fetch_start` region misses due to the erratum and applying our emperical observation we can state that the part starting the `.no_fetch_start` label till the 32-bytes boundary will miss as well.
 
 The expected number of MITE micro-ops would look like
 
@@ -361,7 +361,7 @@ The expected number of MITE micro-ops would look like
 Expected MITE uops = (1L << 31) / 2 * 12 = 12,884,901,888
 ```
 
-The formula needs some explanation. The reason for division by 2 was that the control flow jumps to the `.no_fetch_start` label every 2 iterations (there was the `test edi, 0x1` instruction). Summing up all the micro-ops in the region starting from `.no_fetch_start` we have 
+The formula needs some explanation. The reason for division by 2 was that the control flow jumps to the `.no_fetch_start` label every 2 iterations (there was the `test edi, 0x1` instruction before). Summing up all the micro-ops in the region starting from `.no_fetch_start` we have 
 
 ```
 times 4 nop ax +
