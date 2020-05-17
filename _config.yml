@@ -13,8 +13,8 @@ title: Dmitrii Bundin                          # the main title
 tagline: Low Level Performance Engineering  # it will display as the sub-title
 
 description: >-                        # used by seo meta and the atom feed
-    Research of x86 microarchetictures and
-    Low Level Performance Engineering
+    Low Level Performance Engineering on
+    x86 microarchitectures
 
 # Replace with the website url, e.g. 'https://username.github.io'
 url: 'https://dmitriibundin.github.io'
